@@ -89,6 +89,10 @@ as shown above.
   Hyprland config is changed, and the binds are added again after a config
   reload. Devices without that switch get no automatic pop-up; use the bar
   button.
+- The switch's current position can't be read without access to
+  `/dev/input` (the `input` group), so the plugin assumes the keyboard is
+  attached until the switch first changes. After logging in detached, attach
+  and detach once, or run `omarchy-shell onscreen-keyboard setTabletMode true`.
 - Floating position and size are saved to
   `~/.local/state/omarchy-onscreen-keyboard/state.json`.
 
