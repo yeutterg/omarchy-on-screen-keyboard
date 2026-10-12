@@ -7,7 +7,13 @@ import qs.Commons
 import qs.Commons as Commons
 
 // On-screen keyboard service: runs the Wayland helper, decides when the
-// keyboard shows, and draws it docked along the bottom or floating.
+// keyboard shows, and draws it docked along the bottom (full width or narrow)
+// or floating. Pinch in steps full -> narrow -> floating; spread steps back.
+//
+// Options live in ~/.config/omarchy/onscreen-keyboard.json (read live):
+//   { "dictationCommand": "voxtype record toggle",
+//     "autoShow": "tablet" | "always" | "never",
+//     "narrowWidth": 0.6, "extraRow": true }
 //
 // IPC (omarchy-shell onscreen-keyboard <method>):
 //   show | hide | toggle | float | dock | status
@@ -35,12 +41,16 @@ Item {
   property bool dismissed: false      // hidden by hand while that field stays focused
 
   // Floating keyboard, remembered across restarts
-  property bool floating: false
+  // "full" | "narrow" | "floating" | "mic" (just a floating dictation button)
+  property string layoutMode: "full"
+  readonly property bool floating: layoutMode === "floating"
+  readonly property bool narrow: layoutMode === "narrow"
   property real floatX: -1
   property real floatY: -1
   property real floatWidth: 440
 
-  property bool dictationAvailable: false
+  property bool voxtypeInstalled: false
+  readonly property bool dictationAvailable: customDictation || voxtypeInstalled
   property bool dictating: false
 
   readonly property var screen: {
@@ -53,17 +63,58 @@ Item {
   function show() { shown = true; autoShown = false; dismissed = false }
   function hide() { shown = false; if (imActive) dismissed = true }
   function toggle() { shown ? hide() : show() }
-  function setFloating(on) { floating = on; saveState() }
+  function setFloating(on) { setLayoutMode(on ? "floating" : "full") }
+  function setLayoutMode(mode) { layoutMode = mode; saveState() }
+
+  // Pinch in: full -> narrow -> floating -> mic. Spread steps back. The mic
+  // step only exists when dictation is available.
+  readonly property var layoutSteps: dictationAvailable ? ["full", "narrow", "floating", "mic"] : ["full", "narrow", "floating"]
+  readonly property bool micOnly: layoutMode === "mic"
+  function cycleLayout() {
+    var at = layoutSteps.indexOf(layoutMode)
+    setLayoutMode(layoutSteps[(at + 1) % layoutSteps.length])
+  }
+  function pinch(scale) {
+    var at = layoutSteps.indexOf(layoutMode)
+    if (scale < 0.85 && at < layoutSteps.length - 1) setLayoutMode(layoutSteps[at + 1])
+    else if (scale > 1.15 && at > 0) setLayoutMode(layoutSteps[at - 1])
+  }
+
+  // ---- options (text file) -------------------------------------------------
+
+  readonly property string configFile: (Quickshell.env("XDG_CONFIG_HOME") || Quickshell.env("HOME") + "/.config") + "/omarchy/onscreen-keyboard.json"
+  property var options: ({})
+  readonly property string dictationCommand: typeof options.dictationCommand === "string" && options.dictationCommand !== ""
+    ? options.dictationCommand : "voxtype record toggle"
+  readonly property bool customDictation: typeof options.dictationCommand === "string" && options.dictationCommand !== ""
+  readonly property string autoShow: ["tablet", "always", "never"].indexOf(options.autoShow) >= 0 ? options.autoShow : "tablet"
+  readonly property real narrowFraction: typeof options.narrowWidth === "number" ? Math.max(0.3, Math.min(options.narrowWidth, 0.95)) : 0.6
+  readonly property bool extraRow: options.extraRow !== false
+
+  FileView {
+    id: configView
+    path: root.configFile
+    watchChanges: true
+    printErrors: false
+    onFileChanged: reload()
+    onLoaded: {
+      try { root.options = JSON.parse(text()) || ({}) }
+      catch (e) { root.options = ({}); console.warn("onscreen-keyboard: bad JSON in", root.configFile) }
+    }
+    onLoadFailed: root.options = ({})
+  }
 
   onImActiveChanged: {
     if (imActive) {
-      if (tabletMode && !shown && !dismissed) { shown = true; autoShown = true }
+      if (wantsAutoShow && !shown && !dismissed) { shown = true; autoShown = true }
     } else {
       if (autoShown) shown = false
       autoShown = false
       dismissed = false
     }
   }
+  readonly property bool wantsAutoShow: autoShow === "always" || (autoShow === "tablet" && tabletMode)
+
   onTabletModeChanged: {
     if (!tabletMode) { shown = false; autoShown = false }
     else if (imActive && !dismissed) { shown = true; autoShown = true }
@@ -74,8 +125,9 @@ Item {
   function send(line) { if (helper.running && helperReady) helper.write(line + "\n") }
 
   // Tap the mic to start dictating, tap again to stop (voxtype).
+  // The command comes from the options file; voxtype by default.
   function dictate() {
-    Quickshell.execDetached(["voxtype", "record", "toggle"])
+    Quickshell.execDetached(["sh", "-c", dictationCommand])
     dictating = !dictating
   }
 
@@ -175,7 +227,7 @@ Item {
     id: voxtypeCheck
     command: ["sh", "-c", "command -v voxtype"]
     running: true
-    onExited: function(code) { root.dictationAvailable = code === 0 }
+    onExited: function(code) { root.voxtypeInstalled = code === 0 }
   }
 
   // Keep the mic key honest if dictation stops on its own.
@@ -189,7 +241,7 @@ Item {
   Timer {
     interval: 1000
     repeat: true
-    running: root.dictating && root.shown
+    running: root.dictating && root.shown && !root.customDictation
     onTriggered: voxtypeStatus.running = true
   }
 
@@ -203,17 +255,19 @@ Item {
     onLoaded: {
       try {
         var s = JSON.parse(text())
-        root.floating = !!s.floating
+        root.layoutMode = ["full", "narrow", "floating", "mic"].indexOf(s.layoutMode) >= 0 ? s.layoutMode : (s.floating ? "floating" : "full")
         root.floatX = s.floatX ?? -1
         root.floatY = s.floatY ?? -1
         root.floatWidth = s.floatWidth ?? 440
+        root.micX = s.micX ?? -1
+        root.micY = s.micY ?? -1
       } catch (e) {}
     }
   }
 
   function saveState() {
     mkState.running = true
-    stateView.setText(JSON.stringify({ floating: floating, floatX: floatX, floatY: floatY, floatWidth: floatWidth }))
+    stateView.setText(JSON.stringify({ layoutMode: layoutMode, floatX: floatX, floatY: floatY, floatWidth: floatWidth, micX: micX, micY: micY }))
   }
   Process { id: mkState; command: ["mkdir", "-p", root.stateFile.replace(/\/[^/]*$/, "")] }
 
@@ -226,9 +280,12 @@ Item {
     function toggle(): string { root.toggle(); return "ok" }
     function float(): string { root.setFloating(true); return "ok" }
     function dock(): string { root.setFloating(false); return "ok" }
+    function narrow(): string { root.setLayoutMode("narrow"); return "ok" }
+    function mic(): string { root.setLayoutMode("mic"); return "ok" }
+    function cycle(): string { root.cycleLayout(); return root.layoutMode }
     function setTabletMode(on: string): string { root.tabletMode = on === "true" || on === "1"; return "ok" }
     function status(): string {
-      return JSON.stringify({ shown: root.shown, floating: root.floating, tabletMode: root.tabletMode,
+      return JSON.stringify({ shown: root.shown, layout: root.layoutMode, tabletMode: root.tabletMode,
                               textField: root.imActive, purpose: root.purpose, helper: root.helperReady,
                               switches: root.tabletSwitches, problem: root.problem })
     }
@@ -244,12 +301,14 @@ Item {
   PanelWindow {
     id: dock
     screen: root.screen
-    visible: root.shown && !root.floating
-    anchors { left: true; right: true; bottom: true }
-    implicitHeight: root.dockHeight
+    visible: root.shown && !root.floating && !root.micOnly
+    // Narrow: only the bottom edge is anchored, so the compositor centres it.
+    anchors { left: !root.narrow; right: !root.narrow; bottom: true }
+    implicitWidth: root.narrow ? Math.round(root.screenW * root.narrowFraction) : root.screenW
+    implicitHeight: root.narrow ? Math.round(root.dockHeight * 0.85) : root.dockHeight
     color: "transparent"
     exclusionMode: ExclusionMode.Normal
-    exclusiveZone: root.dockHeight
+    exclusiveZone: implicitHeight
     WlrLayershell.namespace: "omarchy-onscreen-keyboard"
     WlrLayershell.layer: WlrLayer.Overlay
     WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
@@ -258,6 +317,8 @@ Item {
       id: dockKeys
       anchors.fill: parent
       service: root
+      extraRow: root.extraRow
+      onPinched: function(scale) { root.pinch(scale) }
     }
 
     Rectangle {
@@ -266,10 +327,13 @@ Item {
       color: Commons.Color.accent
     }
 
-    // Pinch in to float (like squeezing the iPad keyboard).
-    PinchHandler {
-      target: null
-      onActiveChanged: if (!active && activeScale < 0.8) root.setFloating(true)
+    // Narrow: accent edges on the sides too, so it reads as a card.
+    Rectangle {
+      visible: root.narrow
+      anchors.fill: parent
+      color: "transparent"
+      border.width: 2
+      border.color: Commons.Color.accent
     }
   }
 
@@ -336,14 +400,71 @@ Item {
       anchors { left: parent.left; right: parent.right; bottom: parent.bottom; top: handle.bottom; margins: 2; topMargin: 0 }
       service: root
       compact: true
+      onPinched: function(scale) { root.pinch(scale) }
     }
 
-    // Spread two fingers to dock it again; pinch further to shrink.
-    PinchHandler {
-      target: null
-      onActiveChanged: if (!active) {
-        if (activeScale > 1.3) root.setFloating(false)
-        else if (activeScale < 0.9 || activeScale > 1.05) { root.floatWidth = Math.max(320, Math.min(root.floatWidth * activeScale, root.screenW * 0.7)); root.saveState() }
+  }
+
+  // Mic only: one floating dictation button. Tap to dictate, drag to move,
+  // hold to bring the keyboard back (floating).
+  property real micX: -1
+  property real micY: -1
+  readonly property real micSize: 56
+  readonly property real micLeft: micX < 0 ? screenW - micSize - 24 : Math.max(0, Math.min(micX, screenW - micSize))
+  readonly property real micTop: micY < 0 ? screenH - micSize - 96 : Math.max(0, Math.min(micY, screenH - micSize))
+
+  PanelWindow {
+    id: micWindow
+    screen: root.screen
+    visible: root.shown && root.micOnly
+    anchors { left: true; top: true }
+    margins { left: root.micLeft; top: root.micTop }
+    implicitWidth: root.micSize
+    implicitHeight: root.micSize
+    color: "transparent"
+    exclusionMode: ExclusionMode.Ignore
+    WlrLayershell.namespace: "omarchy-onscreen-keyboard"
+    WlrLayershell.layer: WlrLayer.Overlay
+    WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
+
+    Rectangle {
+      anchors.fill: parent
+      color: micArea.pressed && !micArea.dragging ? Commons.Color.accent
+        : root.dictating ? Commons.Color.urgent : Commons.Color.popups.background
+      border.width: 2
+      border.color: root.dictating ? Commons.Color.urgent : Commons.Color.accent
+
+      Text {
+        anchors.centerIn: parent
+        text: "󰍬"
+        color: micArea.pressed && !micArea.dragging || root.dictating ? Commons.Color.popups.background : Commons.Color.popups.text
+        font.family: Style.font.family
+        font.pixelSize: 26
+      }
+    }
+
+    MouseArea {
+      id: micArea
+      anchors.fill: parent
+      property real pressX: 0
+      property real pressY: 0
+      property bool dragging: false
+      property bool held: false
+      pressAndHoldInterval: 500
+      onPressed: function(m) {
+        pressX = m.x; pressY = m.y; dragging = false; held = false
+        root.micX = root.micLeft; root.micY = root.micTop
+      }
+      onPositionChanged: function(m) {
+        if (!dragging && Math.abs(m.x - pressX) + Math.abs(m.y - pressY) < 8) return
+        dragging = true
+        root.micX = Math.max(0, Math.min(root.micX + m.x - pressX, root.screenW - root.micSize))
+        root.micY = Math.max(0, Math.min(root.micY + m.y - pressY, root.screenH - root.micSize))
+      }
+      onPressAndHold: if (!dragging) { held = true; root.setLayoutMode("floating") }
+      onReleased: {
+        if (dragging) root.saveState()
+        else if (!held) root.dictate()
       }
     }
   }

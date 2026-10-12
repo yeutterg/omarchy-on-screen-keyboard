@@ -2,19 +2,25 @@
 
 A touch keyboard drawn by Omarchy's own shell, in your theme's colors and font.
 On a tablet or detachable it pops up when a text field is focused while the
-keyboard is detached. It docks along the bottom of the screen or floats as a
-small keyboard you can drag anywhere, like the iPad's.
+keyboard is detached. Pinch it like the iPad's keyboard: from full width to a
+narrower docked keyboard, to a small floating keyboard you can drag anywhere,
+to just a floating dictation button.
 
 ![On-screen keyboard docked](preview.png)
 
 - **Pops up on text fields** while in tablet mode, and hides again when the
   field loses focus or the keyboard is reattached.
-- **Docked or floating.** Long-press the hide key, pinch the docked keyboard,
-  or right-click the bar button to float it. Drag the floating keyboard by its
-  handle; double-tap the handle (or spread two fingers) to dock it again.
+- **Four layouts.** Full width, narrow (docked, centred), floating, and a
+  floating mic button. Pinch in to step down, spread to step back up, or tap
+  the layout key (󰘖) to cycle. Drag the floating keyboard by its handle;
+  double-tap the handle to dock it. The mic button drags anywhere; hold it to
+  bring the keyboard back.
 - **Dictation key** for [voxtype](https://github.com/peteonrails/voxtype), which
-  Omarchy sets up with `omarchy-voxtype-install`: tap to start, tap to stop. The
-  key only appears when voxtype is installed.
+  Omarchy sets up with `omarchy-voxtype-install`: tap to start, tap to stop.
+  voxtype transcribes locally with a Whisper model (`omarchy-voxtype-model`
+  picks it; settings in `~/.config/voxtype/config.toml`) and types the text.
+  The key only appears when voxtype is installed or another dictation command
+  is set (see Options).
 - **A digit pad** for PIN, phone and number fields.
 - **Esc, Tab, Ctrl, Alt and arrows** on an extra row for terminals.
 - **Bar button** to show or hide the keyboard. It appears only while the
@@ -63,6 +69,28 @@ Add these two lines to `~/.config/chromium-flags.conf` and restart Chromium:
 Electron apps take the same flags. You can still type into them without the
 flags; the keyboard just won't pop up by itself.
 
+## Options
+
+Optional, in `~/.config/omarchy/onscreen-keyboard.json`; changes apply as soon
+as the file is saved. Every key can be left out.
+
+```json
+{
+  "dictationCommand": "voxtype record toggle",
+  "autoShow": "tablet",
+  "narrowWidth": 0.6,
+  "extraRow": true
+}
+```
+
+- `dictationCommand`: run (with `sh -c`) by the mic key; tap starts, the next
+  tap runs it again. Default: voxtype's toggle.
+- `autoShow`: pop up on text fields in `"tablet"` mode only (default),
+  `"always"`, or `"never"` (bar button and commands only).
+- `narrowWidth`: width of the narrow docked keyboard, as a fraction of the
+  screen (0.3 to 0.95).
+- `extraRow`: the esc/tab/ctrl/alt/arrows row on docked layouts.
+
 ## Remove
 
 ```bash
@@ -93,14 +121,14 @@ as shown above.
   `/dev/input` (the `input` group), so the plugin assumes the keyboard is
   attached until the switch first changes. After logging in detached, attach
   and detach once, or run `omarchy-shell onscreen-keyboard setTabletMode true`.
-- Floating position and size are saved to
+- Layout and floating positions are saved to
   `~/.local/state/omarchy-onscreen-keyboard/state.json`.
 
 ### Commands
 
 ```bash
 omarchy-shell onscreen-keyboard show|hide|toggle
-omarchy-shell onscreen-keyboard float|dock
+omarchy-shell onscreen-keyboard float|dock|narrow|mic|cycle
 omarchy-shell onscreen-keyboard status
 omarchy-shell onscreen-keyboard setTabletMode true|false
 ```
