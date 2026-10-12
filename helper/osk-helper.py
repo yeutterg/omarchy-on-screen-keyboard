@@ -1,0 +1,261 @@
+#!/usr/bin/env python3
+"""Wayland side of the Omarchy on-screen keyboard.
+
+The keyboard is drawn by the plugin inside omarchy-shell. Quickshell can't
+speak the input-method or virtual-keyboard protocols, so this helper does:
+
+  * zwp_input_method_v2: hears when a text field gains or loses focus (and its
+    content purpose, e.g. a PIN field) and commits typed text into it.
+  * zwp_virtual_keyboard_v1: sends real key presses (Backspace, Enter, arrows,
+    Ctrl+C, ...) and text for apps that don't support text input.
+
+Commands, one per line on stdin:
+  text <utf-8 text>            type text
+  key <keysym> [mod,mod...]    press and release a key; mods: shift ctrl alt super
+  quit
+
+Events, one per line on stdout:
+  ready                        connected and registered
+  im 1|0                       a text field is focused / no longer focused
+  purpose <n>                  text-input-v3 content purpose of the focused field
+  unavailable                  another input method is running (fcitx5, squeekboard...)
+  error <message>
+"""
+
+import os
+import select
+import subprocess
+import sys
+import tempfile
+import time
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+
+MODS = {"shift": 1, "ctrl": 4, "alt": 8, "super": 64}
+MOD_KEYSYMS = {"shift": "Shift_L", "ctrl": "Control_L", "alt": "Alt_L", "super": "Super_L"}
+MOD_MAP = {"Shift": "Shift_L", "Control": "Control_L", "Mod1": "Alt_L", "Mod4": "Super_L"}
+
+# Keys every keymap has; text adds its characters on demand.
+BASE_KEYSYMS = [
+    "BackSpace", "Return", "Tab", "Escape", "Delete", "space",
+    "Left", "Right", "Up", "Down", "Home", "End", "Prior", "Next", "Insert",
+    *[f"F{n}" for n in range(1, 13)],
+    *MOD_KEYSYMS.values(),
+]
+
+
+def emit(*parts):
+    print(" ".join(str(p) for p in parts), flush=True)
+
+
+def protocol_modules():
+    """Generate pywayland bindings for the vendored protocols (cached per version)."""
+    import pywayland
+    from pywayland import scanner  # noqa: F401  (fails early if missing)
+
+    # The generated modules import each other relatively, so they live in a
+    # package (osk_protocols) under a per-version cache directory.
+    runtime = Path(os.environ.get("XDG_RUNTIME_DIR") or tempfile.gettempdir())
+    root = runtime / "omarchy-osk" / f"protocols-{pywayland.__version__}"
+    out = root / "osk_protocols"
+    if not (out / "input_method_unstable_v2").is_dir():
+        out.mkdir(parents=True, exist_ok=True)
+        (out / "__init__.py").touch()
+        xmls = [
+            "/usr/share/wayland/wayland.xml",
+            "/usr/share/wayland-protocols/unstable/text-input/text-input-unstable-v3.xml",
+            str(HERE / "protocols" / "input-method-unstable-v2.xml"),
+            str(HERE / "protocols" / "virtual-keyboard-unstable-v1.xml"),
+        ]
+        subprocess.run(
+            [sys.executable, "-m", "pywayland.scanner", "-o", str(out), "-i", *xmls],
+            check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+    sys.path.insert(0, str(root))
+
+
+class Keyboard:
+    def __init__(self):
+        from pywayland.client import Display
+
+        protocol_modules()
+        from osk_protocols.wayland import WlSeat
+        from osk_protocols.input_method_unstable_v2 import ZwpInputMethodManagerV2
+        from osk_protocols.virtual_keyboard_unstable_v1 import ZwpVirtualKeyboardManagerV1
+
+        self.display = Display()
+        self.display.connect()
+        self.seat = self.im_manager = self.vk_manager = None
+
+        def on_global(registry, name, interface, version):
+            if interface == "wl_seat" and self.seat is None:
+                self.seat = registry.bind(name, WlSeat, 1)
+            elif interface == "zwp_input_method_manager_v2":
+                self.im_manager = registry.bind(name, ZwpInputMethodManagerV2, 1)
+            elif interface == "zwp_virtual_keyboard_manager_v1":
+                self.vk_manager = registry.bind(name, ZwpVirtualKeyboardManagerV1, 1)
+
+        registry = self.display.get_registry()
+        registry.dispatcher["global"] = on_global
+        self.display.roundtrip()
+
+        if not self.seat or not self.vk_manager:
+            raise RuntimeError("compositor lacks wl_seat or zwp_virtual_keyboard_manager_v1")
+
+        self.vk = self.vk_manager.create_virtual_keyboard(self.seat)
+        self.keysyms = list(BASE_KEYSYMS)
+        self.upload_keymap()
+
+        # Input method state is double-buffered: events set pending values,
+        # `done` applies them and bumps the serial that commits must echo.
+        self.im = None
+        self.active = False
+        self.pending_active = False
+        self.purpose = 0
+        self.pending_purpose = 0
+        self.serial = 0
+        if self.im_manager:
+            self.im = self.im_manager.get_input_method(self.seat)
+            d = self.im.dispatcher
+            d["activate"] = lambda *_: self._set_pending(True)
+            d["deactivate"] = lambda *_: self._set_pending(False)
+            d["content_type"] = self._on_content_type
+            d["done"] = self._on_done
+            d["unavailable"] = lambda *_: emit("unavailable")
+        else:
+            emit("error", "compositor lacks zwp_input_method_manager_v2; no auto-show")
+
+        self.display.roundtrip()
+
+    # -- input method --------------------------------------------------------
+
+    def _set_pending(self, active):
+        self.pending_active = active
+        if active:
+            self.pending_purpose = 0
+
+    def _on_content_type(self, _im, _hint, purpose):
+        self.pending_purpose = purpose
+
+    def _on_done(self, *_):
+        self.serial += 1
+        if self.pending_purpose != self.purpose:
+            self.purpose = self.pending_purpose
+            emit("purpose", self.purpose)
+        if self.pending_active != self.active:
+            self.active = self.pending_active
+            emit("im", 1 if self.active else 0)
+
+    # -- virtual keyboard ----------------------------------------------------
+
+    def upload_keymap(self):
+        """A keymap with one keysym per keycode, like wtype builds."""
+        codes = "\n".join(f"<K{i}> = {i + 8};" for i in range(len(self.keysyms)))
+        symbols = "\n".join(f"key <K{i}> {{[ {ks} ]}};" for i, ks in enumerate(self.keysyms))
+        modmap = "\n".join(
+            f"modifier_map {mod} {{ <K{self.keysyms.index(ks)}> }};" for mod, ks in MOD_MAP.items()
+        )
+        keymap = (
+            "xkb_keymap {\n"
+            f'xkb_keycodes "osk" {{ minimum = 8; maximum = {max(255, len(self.keysyms) + 8)};\n{codes}\n}};\n'
+            'xkb_types "osk" { include "complete" };\n'
+            'xkb_compat "osk" { include "complete" };\n'
+            f'xkb_symbols "osk" {{\n{symbols}\n{modmap}\n}};\n'
+            "};\n"
+        ).encode() + b"\0"
+        fd = os.memfd_create("osk-keymap")
+        os.write(fd, keymap)
+        os.lseek(fd, 0, os.SEEK_SET)
+        self.vk.keymap(1, fd, len(keymap))  # 1 = WL_KEYBOARD_KEYMAP_FORMAT_XKB_V1
+        os.close(fd)
+
+    def keycode(self, keysym):
+        if keysym not in self.keysyms:
+            self.keysyms.append(keysym)
+            self.upload_keymap()
+        return self.keysyms.index(keysym)
+
+    def press(self, keysym, mods=()):
+        mask = 0
+        for mod in mods:
+            mask |= MODS.get(mod, 0)
+        code = self.keycode(keysym)
+        now = int(time.monotonic() * 1000) & 0xFFFFFFFF
+        if mask:
+            self.vk.modifiers(mask, 0, 0, 0)
+        self.vk.key(now, code, 1)
+        self.vk.key(now, code, 0)
+        if mask:
+            self.vk.modifiers(0, 0, 0, 0)
+
+    # -- commands ------------------------------------------------------------
+
+    def type_text(self, text):
+        if self.im and self.active:
+            self.im.commit_string(text)
+            self.im.commit(self.serial)
+            return
+        for char in text:
+            if char == "\n":
+                self.press("Return")
+            elif char == "\t":
+                self.press("Tab")
+            else:
+                self.press(f"U{ord(char):04X}")
+
+    def handle(self, line):
+        cmd, _, arg = line.partition(" ")
+        if cmd == "text":
+            self.type_text(arg)
+        elif cmd == "key":
+            keysym, _, mods = arg.partition(" ")
+            self.press(keysym, [m for m in mods.split(",") if m])
+        elif cmd == "quit":
+            return False
+        else:
+            emit("error", f"unknown command {cmd!r}")
+        return True
+
+    def run(self):
+        emit("ready")
+        display_fd = self.display.get_fd()
+        stdin_fd = sys.stdin.fileno()
+        buffer = b""
+        while True:
+            self.display.dispatch(block=False)
+            self.display.flush()
+            readable, _, _ = select.select([display_fd, stdin_fd], [], [])
+            if display_fd in readable:
+                self.display.dispatch(block=True)
+            if stdin_fd in readable:
+                chunk = os.read(stdin_fd, 65536)
+                if not chunk:
+                    return
+                buffer += chunk
+                while b"\n" in buffer:
+                    raw, buffer = buffer.split(b"\n", 1)
+                    if not self.handle(raw.decode("utf-8", "replace")):
+                        return
+                self.display.flush()
+
+
+def main():
+    try:
+        keyboard = Keyboard()
+        keyboard.run()
+        # Skip interpreter teardown: garbage-collecting pywayland proxies after
+        # the connection is gone segfaults. The compositor cleans up for us.
+        keyboard.display.flush()
+        sys.stdout.flush()
+        os._exit(0)
+    except ModuleNotFoundError as error:
+        emit("error", f"missing {error.name}: install python-pywayland")
+        sys.exit(2)
+    except Exception as error:  # report to the shell instead of a silent exit
+        emit("error", str(error).replace("\n", " "))
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()

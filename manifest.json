@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "id": "io.github.yeutterg.onscreen-keyboard",
+  "name": "On-Screen Keyboard",
+  "version": "0.1.0",
+  "author": "yeutterg",
+  "license": "MIT",
+  "description": "A touch keyboard in Omarchy's style: pops up on text fields when a tablet or detachable is in tablet mode, docks or floats (pinch or long-press to switch), and has a dictation key for voxtype.",
+  "kinds": [
+    "service",
+    "bar-widget"
+  ],
+  "keepLoaded": true,
+  "entryPoints": {
+    "service": "Service.qml",
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "On-Screen Keyboard",
+    "description": "Show or hide the on-screen keyboard",
+    "category": "Input",
+    "allowMultiple": false,
+    "defaultSection": "right"
+  }
+}
