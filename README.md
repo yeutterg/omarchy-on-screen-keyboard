@@ -17,8 +17,8 @@ small keyboard you can drag anywhere, like the iPad's.
   key only appears when voxtype is installed.
 - **A digit pad** for PIN, phone and number fields.
 - **Esc, Tab, Ctrl, Alt and arrows** on an extra row for terminals.
-- **Bar button** to show or hide the keyboard anytime, including without
-  tablet mode.
+- **Bar button** to show or hide the keyboard. It appears only while the
+  keyboard is detached (or the on-screen keyboard is open).
 - Follows theme and font changes live.
 
 ## Install
