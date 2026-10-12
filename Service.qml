@@ -337,76 +337,16 @@ Item {
     }
   }
 
-  // Floating: a small keyboard that can be dragged anywhere.
+  // Floating keyboard and mic button. Both live in one full-screen overlay
+  // whose input region is only the visible card, so touches elsewhere reach
+  // the apps below. Dragging moves the card inside this window rather than
+  // moving a window under the finger, which races the compositor and made the
+  // card jump to the screen edges.
   readonly property real floatHeight: Math.round(floatWidth * 0.62)
-  readonly property real floatLeft: floatX < 0 ? (screenW - floatWidth) / 2 : Math.max(0, Math.min(floatX, screenW - floatWidth))
-  readonly property real floatTop: floatY < 0 ? screenH - floatHeight - 80 : Math.max(0, Math.min(floatY, screenH - floatHeight - handleHeight))
   readonly property real handleHeight: 22
+  readonly property real floatLeft: floatX < 0 ? (screenW - floatWidth) / 2 : Math.max(0, Math.min(floatX, screenW - floatWidth))
+  readonly property real floatTop: floatY < 0 ? screenH - floatHeight - handleHeight - 80 : Math.max(0, Math.min(floatY, screenH - floatHeight - handleHeight))
 
-  PanelWindow {
-    id: floater
-    screen: root.screen
-    visible: root.shown && root.floating
-    anchors { left: true; top: true }
-    margins { left: root.floatLeft; top: root.floatTop }
-    implicitWidth: root.floatWidth
-    implicitHeight: root.floatHeight + root.handleHeight
-    color: "transparent"
-    exclusionMode: ExclusionMode.Ignore
-    WlrLayershell.namespace: "omarchy-onscreen-keyboard"
-    WlrLayershell.layer: WlrLayer.Overlay
-    WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
-
-    Rectangle {
-      anchors.fill: parent
-      color: Commons.Color.popups.background
-      border.width: 2
-      border.color: Commons.Color.accent
-    }
-
-    // Drag handle. The window moves under the finger, so the press point stays
-    // put in window coordinates: each move adds its offset from that point.
-    Item {
-      id: handle
-      anchors { left: parent.left; right: parent.right; top: parent.top }
-      height: root.handleHeight
-
-      Rectangle {
-        anchors.centerIn: parent
-        width: 48
-        height: 4
-        color: Qt.alpha(Commons.Color.popups.text, 0.4)
-      }
-
-      MouseArea {
-        anchors.fill: parent
-        property real pressX: 0
-        property real pressY: 0
-        onPressed: function(m) {
-          pressX = m.x; pressY = m.y
-          root.floatX = root.floatLeft; root.floatY = root.floatTop
-        }
-        onPositionChanged: function(m) {
-          root.floatX = Math.max(0, Math.min(root.floatX + m.x - pressX, root.screenW - root.floatWidth))
-          root.floatY = Math.max(0, Math.min(root.floatY + m.y - pressY, root.screenH - root.floatHeight - root.handleHeight))
-        }
-        onReleased: root.saveState()
-        // Double tap the handle to dock again.
-        onDoubleClicked: root.setFloating(false)
-      }
-    }
-
-    Keyboard {
-      anchors { left: parent.left; right: parent.right; bottom: parent.bottom; top: handle.bottom; margins: 2; topMargin: 0 }
-      service: root
-      compact: true
-      onPinched: function(scale) { root.pinch(scale) }
-    }
-
-  }
-
-  // Mic only: one floating dictation button. Tap to dictate, drag to move,
-  // hold to bring the keyboard back (floating).
   property real micX: -1
   property real micY: -1
   readonly property real micSize: 56
@@ -414,57 +354,123 @@ Item {
   readonly property real micTop: micY < 0 ? screenH - micSize - 96 : Math.max(0, Math.min(micY, screenH - micSize))
 
   PanelWindow {
-    id: micWindow
+    id: overlay
     screen: root.screen
-    visible: root.shown && root.micOnly
-    anchors { left: true; top: true }
-    margins { left: root.micLeft; top: root.micTop }
-    implicitWidth: root.micSize
-    implicitHeight: root.micSize
+    visible: root.shown && (root.floating || root.micOnly)
+    anchors { left: true; right: true; top: true; bottom: true }
     color: "transparent"
     exclusionMode: ExclusionMode.Ignore
     WlrLayershell.namespace: "omarchy-onscreen-keyboard"
     WlrLayershell.layer: WlrLayer.Overlay
     WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
+    mask: Region { item: root.micOnly ? micCard : card }
 
-    Rectangle {
+    Item {
+      id: space
       anchors.fill: parent
-      color: micArea.pressed && !micArea.dragging ? Commons.Color.accent
-        : root.dictating ? Commons.Color.urgent : Commons.Color.popups.background
-      border.width: 2
-      border.color: root.dictating ? Commons.Color.urgent : Commons.Color.accent
 
-      Text {
-        anchors.centerIn: parent
-        text: "󰍬"
-        color: micArea.pressed && !micArea.dragging || root.dictating ? Commons.Color.popups.background : Commons.Color.popups.text
-        font.family: Style.font.family
-        font.pixelSize: 26
-      }
-    }
+      // ---- floating keyboard ----
+      Rectangle {
+        id: card
+        visible: root.floating
+        x: root.floatLeft
+        y: root.floatTop
+        width: root.floatWidth
+        height: root.floatHeight + root.handleHeight
+        color: Commons.Color.popups.background
+        border.width: 2
+        border.color: Commons.Color.accent
 
-    MouseArea {
-      id: micArea
-      anchors.fill: parent
-      property real pressX: 0
-      property real pressY: 0
-      property bool dragging: false
-      property bool held: false
-      pressAndHoldInterval: 500
-      onPressed: function(m) {
-        pressX = m.x; pressY = m.y; dragging = false; held = false
-        root.micX = root.micLeft; root.micY = root.micTop
+        Item {
+          id: handle
+          anchors { left: parent.left; right: parent.right; top: parent.top }
+          height: root.handleHeight
+
+          Rectangle {
+            anchors.centerIn: parent
+            width: 48
+            height: 4
+            color: Qt.alpha(Commons.Color.popups.text, 0.4)
+          }
+
+          MouseArea {
+            anchors.fill: parent
+            property real grabX: 0
+            property real grabY: 0
+            onPressed: function(m) {
+              var p = mapToItem(space, m.x, m.y)
+              grabX = p.x - root.floatLeft
+              grabY = p.y - root.floatTop
+            }
+            onPositionChanged: function(m) {
+              var p = mapToItem(space, m.x, m.y)
+              root.floatX = Math.max(0, Math.min(p.x - grabX, root.screenW - root.floatWidth))
+              root.floatY = Math.max(0, Math.min(p.y - grabY, root.screenH - root.floatHeight - root.handleHeight))
+            }
+            onReleased: root.saveState()
+            // Double tap the handle to dock again.
+            onDoubleClicked: root.setFloating(false)
+          }
+        }
+
+        Keyboard {
+          anchors { left: parent.left; right: parent.right; bottom: parent.bottom; top: handle.bottom; margins: 2; topMargin: 0 }
+          service: root
+          compact: true
+          onPinched: function(scale) { root.pinch(scale) }
+        }
       }
-      onPositionChanged: function(m) {
-        if (!dragging && Math.abs(m.x - pressX) + Math.abs(m.y - pressY) < 8) return
-        dragging = true
-        root.micX = Math.max(0, Math.min(root.micX + m.x - pressX, root.screenW - root.micSize))
-        root.micY = Math.max(0, Math.min(root.micY + m.y - pressY, root.screenH - root.micSize))
-      }
-      onPressAndHold: if (!dragging) { held = true; root.setLayoutMode("floating") }
-      onReleased: {
-        if (dragging) root.saveState()
-        else if (!held) root.dictate()
+
+      // ---- mic only: tap to dictate, drag to move, hold for the keyboard ----
+      Rectangle {
+        id: micCard
+        visible: root.micOnly
+        x: root.micLeft
+        y: root.micTop
+        width: root.micSize
+        height: root.micSize
+        color: micArea.pressed && !micArea.dragging ? Commons.Color.accent
+          : root.dictating ? Commons.Color.urgent : Commons.Color.popups.background
+        border.width: 2
+        border.color: root.dictating ? Commons.Color.urgent : Commons.Color.accent
+
+        Text {
+          anchors.centerIn: parent
+          text: "󰍬"
+          color: micArea.pressed && !micArea.dragging || root.dictating ? Commons.Color.popups.background : Commons.Color.popups.text
+          font.family: Style.font.family
+          font.pixelSize: 26
+        }
+
+        MouseArea {
+          id: micArea
+          anchors.fill: parent
+          property real grabX: 0
+          property real grabY: 0
+          property real startX: 0
+          property real startY: 0
+          property bool dragging: false
+          property bool held: false
+          pressAndHoldInterval: 500
+          onPressed: function(m) {
+            var p = mapToItem(space, m.x, m.y)
+            grabX = p.x - root.micLeft; grabY = p.y - root.micTop
+            startX = p.x; startY = p.y
+            dragging = false; held = false
+          }
+          onPositionChanged: function(m) {
+            var p = mapToItem(space, m.x, m.y)
+            if (!dragging && Math.abs(p.x - startX) + Math.abs(p.y - startY) < 8) return
+            dragging = true
+            root.micX = Math.max(0, Math.min(p.x - grabX, root.screenW - root.micSize))
+            root.micY = Math.max(0, Math.min(p.y - grabY, root.screenH - root.micSize))
+          }
+          onPressAndHold: if (!dragging) { held = true; root.setLayoutMode("floating") }
+          onReleased: {
+            if (dragging) root.saveState()
+            else if (!held) root.dictate()
+          }
+        }
       }
     }
   }

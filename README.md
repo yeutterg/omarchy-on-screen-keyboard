@@ -105,7 +105,9 @@ as shown above.
 
 - `Service.qml` draws the keyboard inside `omarchy-shell` as a layer-shell
   surface that never takes keyboard focus, so the app you're typing into keeps
-  it.
+  it. The floating keyboard and mic button sit in a full-screen overlay whose
+  input region is only the visible card, so they drag anywhere and touches
+  elsewhere reach the apps below.
 - `helper/osk-helper.py` is a small Python program the service starts. It
   registers as the Wayland input method (`zwp_input_method_v2`) to learn when a
   text field is focused and what it wants (digits, text), and commits typed
