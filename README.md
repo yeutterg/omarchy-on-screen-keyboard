@@ -112,7 +112,12 @@ as shown above.
   registers as the Wayland input method (`zwp_input_method_v2`) to learn when a
   text field is focused and what it wants (digits, text), and commits typed
   text into it. Keys like Backspace, Enter, arrows and Ctrl+C go through a
-  virtual keyboard (`zwp_virtual_keyboard_v1`).
+  virtual keyboard (`zwp_virtual_keyboard_v1`). It generates Python bindings
+  for those protocols once per pywayland version into
+  `$XDG_RUNTIME_DIR/omarchy-onscreen-keyboard/` (or `~/.cache/` without a
+  runtime directory, never `/tmp`). Every directory on that path must be a
+  real directory owned by you and closed to other users, or the helper refuses
+  to start, so nobody else can plant code for it to import.
 - Tablet mode comes from the kernel's tablet-mode switch: the service finds
   devices reporting `SW_TABLET_MODE` in `/proc/bus/input/devices` and adds
   Hyprland switch binds at runtime with `hyprctl eval`. Nothing in your

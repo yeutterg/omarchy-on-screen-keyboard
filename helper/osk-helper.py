@@ -24,6 +24,8 @@ Events, one per line on stdout:
 
 import os
 import select
+import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -49,19 +51,56 @@ def emit(*parts):
     print(" ".join(str(p) for p in parts), flush=True)
 
 
+def owned_dir(path, create=False, strict=True):
+    """Return path if it's a real directory owned by us and not writable by
+    others (with strict, not readable either); create it 0700 if asked.
+    Anything else (a symlink, another user's directory) is refused."""
+    if create:
+        try:
+            os.mkdir(path, 0o700)
+        except FileExistsError:
+            pass
+    info = os.lstat(path)
+    if not stat.S_ISDIR(info.st_mode):
+        raise RuntimeError(f"{path} is not a directory (or is a symlink)")
+    if info.st_uid != os.getuid():
+        raise RuntimeError(f"{path} is owned by another user")
+    if info.st_mode & (0o077 if strict else 0o022):
+        raise RuntimeError(f"{path} is accessible to other users")
+    return path
+
+
+def cache_base():
+    """An owner-only base directory: $XDG_RUNTIME_DIR, else the user's cache
+    directory. Never a shared directory like /tmp; with neither, fail closed."""
+    runtime = os.environ.get("XDG_RUNTIME_DIR")
+    if runtime:
+        return owned_dir(runtime)
+    home = os.path.expanduser("~")
+    cache = os.environ.get("XDG_CACHE_HOME") or os.path.join(home, ".cache")
+    if not os.path.isabs(cache):
+        raise RuntimeError("no safe cache directory (XDG_RUNTIME_DIR unset, XDG_CACHE_HOME not absolute)")
+    owned_dir(home, strict=False)
+    return owned_dir(cache, create=True, strict=False)
+
+
 def protocol_modules():
     """Generate pywayland bindings for the vendored protocols (cached per version)."""
     import pywayland
     from pywayland import scanner  # noqa: F401  (fails early if missing)
 
     # The generated modules import each other relatively, so they live in a
-    # package (osk_protocols) under a per-version cache directory.
-    runtime = Path(os.environ.get("XDG_RUNTIME_DIR") or tempfile.gettempdir())
-    root = runtime / "omarchy-osk" / f"protocols-{pywayland.__version__}"
-    out = root / "osk_protocols"
-    if not (out / "input_method_unstable_v2").is_dir():
-        out.mkdir(parents=True, exist_ok=True)
-        (out / "__init__.py").touch()
+    # package (osk_protocols) under a per-version directory. Every directory
+    # down to it is checked to be ours alone before anything is imported.
+    top = owned_dir(os.path.join(cache_base(), "omarchy-onscreen-keyboard"), create=True)
+    root = os.path.join(top, f"protocols-{pywayland.__version__}")
+    if not os.path.lexists(root):
+        # Generate into a private temporary directory, then rename it into
+        # place, so a half-written cache is never used.
+        work = tempfile.mkdtemp(prefix=".generate-", dir=top)
+        out = os.path.join(work, "osk_protocols")
+        os.mkdir(out, 0o700)
+        open(os.path.join(out, "__init__.py"), "w").close()
         xmls = [
             "/usr/share/wayland/wayland.xml",
             "/usr/share/wayland-protocols/unstable/text-input/text-input-unstable-v3.xml",
@@ -69,10 +108,16 @@ def protocol_modules():
             str(HERE / "protocols" / "virtual-keyboard-unstable-v1.xml"),
         ]
         subprocess.run(
-            [sys.executable, "-m", "pywayland.scanner", "-o", str(out), "-i", *xmls],
+            [sys.executable, "-m", "pywayland.scanner", "-o", out, "-i", *xmls],
             check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         )
-    sys.path.insert(0, str(root))
+        try:
+            os.rename(work, root)
+        except OSError:
+            shutil.rmtree(work, ignore_errors=True)  # another helper got there first
+    owned_dir(root)
+    owned_dir(os.path.join(root, "osk_protocols"))
+    sys.path.insert(0, root)
 
 
 class Keyboard:
