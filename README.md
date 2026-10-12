@@ -1,5 +1,7 @@
 # On-Screen Keyboard for Omarchy
 
+Listed on the [Omarchy plugin marketplace](https://plugins.omarchy.org/plugin.html?id=io.github.yeutterg.onscreen-keyboard).
+
 A touch keyboard drawn by Omarchy's own shell, in your theme's colors and font.
 On a tablet or detachable it pops up when a text field is focused while the
 keyboard is detached. Pinch it like the iPad's keyboard: from full width to a
