@@ -19,8 +19,22 @@ Item {
   property var mods: ({})             // latched ctrl / alt for the next key
 
   readonly property var rows: {
-    var base = Layouts.views[view] || Layouts.views.letters
+    var base = (Layouts.views[view] || Layouts.views.letters).map(function(row) { return withLayoutKeys(row) })
     return (extraRow && !compact && view !== "digits") ? [Layouts.extraRow].concat(base) : base
+  }
+  // Shrink and grow keys only where the layout can step that way (full width
+  // can't grow); a dropped key's width goes to the space bar.
+  function withLayoutKeys(row) {
+    var spare = 0
+    var kept = row.filter(function(k) {
+      var drop = (k.t === "shrink" && !service.canShrink) || (k.t === "grow" && !service.canGrow)
+      if (drop) spare += k.w || 1
+      return !drop
+    })
+    if (!spare) return row
+    return kept.map(function(k) {
+      return k.t === "space" ? Object.assign({}, k, { w: (k.w || 1) + spare }) : k
+    })
   }
   readonly property real gap: compact ? 4 : 6
   // A key of width w spans w units plus the w-1 gaps it covers, so a row of
@@ -159,8 +173,11 @@ Item {
     case "mic":
       service.dictate()
       return
-    case "layout":
-      service.cycleLayout()
+    case "shrink":
+      service.shrinkLayout()
+      return
+    case "grow":
+      service.growLayout()
       return
     }
     if (shift && !capsLock) shift = false
@@ -246,7 +263,7 @@ Item {
             readonly property bool isKey: true
             readonly property bool isGap: key.t === "gap"
             property bool down: false
-            readonly property bool isMod: ["key", "mod", "shift", "view", "hide", "mic", "layout"].indexOf(key.t) >= 0 && key.v !== "Return"
+            readonly property bool isMod: ["key", "mod", "shift", "view", "hide", "mic", "shrink", "grow"].indexOf(key.t) >= 0 && key.v !== "Return"
             readonly property bool lit: (key.t === "shift" && (root.shift || root.capsLock))
               || (key.t === "mod" && root.mods[key.v] === true)
               || (key.t === "mic" && root.service.dictating)

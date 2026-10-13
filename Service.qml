@@ -77,6 +77,10 @@ Item {
   // step only exists when dictation is available.
   readonly property var layoutSteps: dictationAvailable ? ["full", "narrow", "floating", "mic"] : ["full", "narrow", "floating"]
   readonly property bool micOnly: layoutMode === "mic"
+  readonly property bool canShrink: layoutSteps.indexOf(layoutMode) < layoutSteps.length - 1
+  readonly property bool canGrow: layoutSteps.indexOf(layoutMode) > 0
+  function shrinkLayout() { if (canShrink) setLayoutMode(layoutSteps[layoutSteps.indexOf(layoutMode) + 1]) }
+  function growLayout() { if (canGrow) setLayoutMode(layoutSteps[layoutSteps.indexOf(layoutMode) - 1]) }
   function cycleLayout() {
     var at = layoutSteps.indexOf(layoutMode)
     setLayoutMode(layoutSteps[(at + 1) % layoutSteps.length])

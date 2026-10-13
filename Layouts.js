@@ -8,7 +8,9 @@
 //   shift  one tap: next letter upper case; double tap: caps lock
 //   view   switches to view v
 //   space, mic, hide  special actions
-//   layout cycles full width -> narrow -> floating -> mic button
+//   shrink, grow  step the layout full width <-> narrow <-> floating <-> mic
+//                 button; the keyboard drops whichever can't step further
+//                 and gives its width to the space bar
 //   gap    empty space of width w
 
 function c(chars) {
@@ -31,9 +33,10 @@ function bottomRow(viewKey, viewLabel) {
   return [
     { t: "view", l: viewLabel, v: viewKey, w: 1.25 },
     { t: "hide", l: "󰌐", w: 1 },
-    { t: "layout", l: "󰘖", w: 1 },
+    { t: "shrink", l: "󰘕", w: 1 },
+    { t: "grow", l: "󰘖", w: 1 },
     { t: "mic", l: "󰍬", w: 1 },
-    { t: "space", l: "", w: 3.5 },
+    { t: "space", l: "", w: 2.5 },
     { t: "char", l: ".", w: 1 },
     { t: "key", l: "󰌑", v: "Return", w: 1.25 },
   ]
