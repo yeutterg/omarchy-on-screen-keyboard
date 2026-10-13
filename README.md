@@ -18,8 +18,8 @@ to just a floating dictation button.
 - **Four layouts.** Full width, narrow (docked, centred), floating, and a
   floating mic button. Pinch in to step down, spread to step back up, or tap
   the layout key (󰘖) to cycle. Drag the floating keyboard by its handle;
-  double-tap the handle to dock it. The mic button drags anywhere; hold it to
-  bring the keyboard back.
+  double-tap the handle to dock it. The mic button drags anywhere; tap the
+  expand key beside it (or hold the mic) to bring the keyboard back.
 - **Dictation key** for [voxtype](https://github.com/peteonrails/voxtype), which
   Omarchy sets up with `omarchy-voxtype-install`: tap to start, tap to stop.
   voxtype transcribes locally with a Whisper model (`omarchy-voxtype-model`

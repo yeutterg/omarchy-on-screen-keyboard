@@ -445,7 +445,9 @@ Item {
   property real micX: -1
   property real micY: -1
   readonly property real micSize: 56
-  readonly property real micLeft: micX < 0 ? screenW - micSize - 24 : Math.max(0, Math.min(micX, screenW - micSize))
+  readonly property real expandSize: 44
+  readonly property real micWidth: micSize + expandSize
+  readonly property real micLeft: micX < 0 ? screenW - micWidth - 24 : Math.max(0, Math.min(micX, screenW - micWidth))
   readonly property real micTop: micY < 0 ? screenH - micSize - 96 : Math.max(0, Math.min(micY, screenH - micSize))
 
   PanelWindow {
@@ -516,25 +518,60 @@ Item {
         }
       }
 
-      // ---- mic only: tap to dictate, drag to move, hold for the keyboard ----
+      // ---- mic only: tap the mic to dictate, tap the expand key (or hold
+      // the mic) for the keyboard, drag either to move ----
       Rectangle {
         id: micCard
         visible: root.micOnly
         x: root.micLeft
         y: root.micTop
-        width: root.micSize
+        width: root.micWidth
         height: root.micSize
-        color: micArea.pressed && !micArea.dragging ? Commons.Color.accent
-          : root.dictating ? Commons.Color.urgent : Commons.Color.popups.background
+        color: Commons.Color.popups.background
         border.width: 2
         border.color: root.dictating ? Commons.Color.urgent : Commons.Color.accent
 
-        Text {
-          anchors.centerIn: parent
-          text: "󰍬"
-          color: micArea.pressed && !micArea.dragging || root.dictating ? Commons.Color.popups.background : Commons.Color.popups.text
-          font.family: Style.font.family
-          font.pixelSize: 26
+        readonly property bool micDown: micArea.pressed && !micArea.dragging && micArea.onMic
+        readonly property bool expandDown: micArea.pressed && !micArea.dragging && !micArea.onMic
+
+        Rectangle {
+          x: 2; y: 2
+          width: root.micSize - 3
+          height: root.micSize - 4
+          color: micCard.micDown ? Commons.Color.accent
+            : root.dictating ? Commons.Color.urgent : "transparent"
+
+          Text {
+            anchors.centerIn: parent
+            text: "󰍬"
+            color: micCard.micDown || root.dictating ? Commons.Color.popups.background : Commons.Color.popups.text
+            font.family: Style.font.family
+            font.pixelSize: 26
+          }
+        }
+
+        Rectangle {
+          x: root.micSize - 1
+          y: 8
+          width: 1
+          height: root.micSize - 16
+          color: Qt.alpha(Commons.Color.popups.text, 0.25)
+        }
+
+        Rectangle {
+          x: root.micSize
+          y: 2
+          width: root.expandSize - 2
+          height: root.micSize - 4
+          color: micCard.expandDown ? Commons.Color.accent : "transparent"
+
+          Text {
+            anchors.centerIn: parent
+            text: "󰘖"
+            color: micCard.expandDown ? Commons.Color.popups.background : Commons.Color.popups.text
+            font.family: Style.font.family
+            font.pixelSize: 20
+          }
         }
 
         MouseArea {
@@ -546,24 +583,28 @@ Item {
           property real startY: 0
           property bool dragging: false
           property bool held: false
+          property bool onMic: true
           pressAndHoldInterval: 500
           onPressed: function(m) {
             var p = mapToItem(space, m.x, m.y)
             grabX = p.x - root.micLeft; grabY = p.y - root.micTop
             startX = p.x; startY = p.y
             dragging = false; held = false
+            onMic = m.x < root.micSize
           }
           onPositionChanged: function(m) {
             var p = mapToItem(space, m.x, m.y)
             if (!dragging && Math.abs(p.x - startX) + Math.abs(p.y - startY) < 8) return
             dragging = true
-            root.micX = Math.max(0, Math.min(p.x - grabX, root.screenW - root.micSize))
+            root.micX = Math.max(0, Math.min(p.x - grabX, root.screenW - root.micWidth))
             root.micY = Math.max(0, Math.min(p.y - grabY, root.screenH - root.micSize))
           }
-          onPressAndHold: if (!dragging) { held = true; root.setLayoutMode("floating") }
+          onPressAndHold: if (!dragging && onMic) { held = true; root.setLayoutMode("floating") }
           onReleased: {
             if (dragging) root.saveState()
-            else if (!held) root.dictate()
+            else if (held) return
+            else if (onMic) root.dictate()
+            else root.setLayoutMode("floating")
           }
         }
       }
