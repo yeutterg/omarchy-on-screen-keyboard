@@ -153,9 +153,10 @@ as shown above.
   elsewhere reach the apps below.
 - `helper/osk-helper.py` is a small Python program the service starts. It
   registers as the Wayland input method (`zwp_input_method_v2`) to learn when a
-  text field is focused and what it wants (digits, text), and commits typed
-  text into it. Keys like Backspace, Enter, arrows and Ctrl+C go through a
-  virtual keyboard (`zwp_virtual_keyboard_v1`). It generates Python bindings
+  text field is focused and what it wants (digits, text). Everything is typed
+  as key presses through a virtual keyboard (`zwp_virtual_keyboard_v1`), like
+  wtype: Chromium accepts text handed over by the input method but sometimes
+  drops it, and key presses work in every app. It generates Python bindings
   for those protocols once per pywayland version into
   `$XDG_RUNTIME_DIR/omarchy-onscreen-keyboard/` (or `~/.cache/` without a
   runtime directory, never `/tmp`). Every directory on that path must be a

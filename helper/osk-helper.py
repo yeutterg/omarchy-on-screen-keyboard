@@ -5,9 +5,9 @@ The keyboard is drawn by the plugin inside omarchy-shell. Quickshell can't
 speak the input-method or virtual-keyboard protocols, so this helper does:
 
   * zwp_input_method_v2: hears when a text field gains or loses focus (and its
-    content purpose, e.g. a PIN field) and commits typed text into it.
-  * zwp_virtual_keyboard_v1: sends real key presses (Backspace, Enter, arrows,
-    Ctrl+C, ...) and text for apps that don't support text input.
+    content purpose, e.g. a PIN field).
+  * zwp_virtual_keyboard_v1: types everything as real key presses: text,
+    Backspace, Enter, arrows, Ctrl+C, ...
 
 Commands, one per line on stdin:
   text <utf-8 text>            type text
@@ -38,12 +38,14 @@ MODS = {"shift": 1, "ctrl": 4, "alt": 8, "super": 64}
 MOD_KEYSYMS = {"shift": "Shift_L", "ctrl": "Control_L", "alt": "Alt_L", "super": "Super_L"}
 MOD_MAP = {"Shift": "Shift_L", "Control": "Control_L", "Mod1": "Alt_L", "Mod4": "Super_L"}
 
-# Keys every keymap has; text adds its characters on demand.
+# Keys every keymap has, printable ASCII included so typing rarely changes the
+# keymap; other characters are added on demand.
 BASE_KEYSYMS = [
     "BackSpace", "Return", "Tab", "Escape", "Delete", "space",
     "Left", "Right", "Up", "Down", "Home", "End", "Prior", "Next", "Insert",
     *[f"F{n}" for n in range(1, 13)],
     *MOD_KEYSYMS.values(),
+    *[f"U{c:04X}" for c in range(0x21, 0x7F)],
 ]
 
 
@@ -153,13 +155,12 @@ class Keyboard:
         self.upload_keymap()
 
         # Input method state is double-buffered: events set pending values,
-        # `done` applies them and bumps the serial that commits must echo.
+        # `done` applies them. It only tells the keyboard when to pop up.
         self.im = None
         self.active = False
         self.pending_active = False
         self.purpose = 0
         self.pending_purpose = 0
-        self.serial = 0
         if self.im_manager:
             self.im = self.im_manager.get_input_method(self.seat)
             d = self.im.dispatcher
@@ -184,7 +185,6 @@ class Keyboard:
         self.pending_purpose = purpose
 
     def _on_done(self, *_):
-        self.serial += 1
         if self.pending_purpose != self.purpose:
             self.purpose = self.pending_purpose
             emit("purpose", self.purpose)
@@ -237,15 +237,16 @@ class Keyboard:
     # -- commands ------------------------------------------------------------
 
     def type_text(self, text):
-        if self.im and self.active:
-            self.im.commit_string(text)
-            self.im.commit(self.serial)
-            return
+        # Always as key presses, never the input method's commit_string:
+        # Chromium (text-input-v3) acknowledges commits but can drop the text,
+        # while key presses reach every app, like wtype.
         for char in text:
             if char == "\n":
                 self.press("Return")
             elif char == "\t":
                 self.press("Tab")
+            elif char == " ":
+                self.press("space")
             else:
                 self.press(f"U{ord(char):04X}")
 
