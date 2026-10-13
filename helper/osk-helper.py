@@ -285,7 +285,63 @@ class Keyboard:
                 self.display.flush()
 
 
+# ---- swipe word list ----------------------------------------------------------
+# Swipe typing needs English words ranked by frequency. Rather than ship one,
+# the plugin downloads hermitdave/FrequencyWords' 50k English list (from
+# OpenSubtitles 2018, CC BY-SA 4.0) from a pinned commit, checks its SHA-256
+# and keeps it in ~/.local/share/omarchy-onscreen-keyboard/. Turning swipe
+# off ("swipe": false) deletes it.
+
+WORDS_URL = ("https://raw.githubusercontent.com/hermitdave/FrequencyWords/"
+             "525f9b560de45753a5ea01069454e72e9aa541c6/content/2018/en/en_50k.txt")
+WORDS_SHA256 = "5351ff405b1126ef555791dd4d9798a48e3e9a501a9fc481a9da957752cfb458"
+WORDS_FILE = "words-en.txt"
+
+
+def words_dir():
+    home = os.path.expanduser("~")
+    data = os.environ.get("XDG_DATA_HOME") or os.path.join(home, ".local", "share")
+    if not os.path.isabs(data):
+        raise RuntimeError("XDG_DATA_HOME is not absolute")
+    owned_dir(home, strict=False)
+    owned_dir(data, create=True, strict=False)
+    return owned_dir(os.path.join(data, "omarchy-onscreen-keyboard"), create=True)
+
+
+def words(action):
+    import hashlib
+    import urllib.request
+
+    target = os.path.join(words_dir(), WORDS_FILE)
+    if action == "remove":
+        if os.path.lexists(target):
+            os.remove(target)
+        emit("removed")
+        return
+    if os.path.lexists(target):
+        if not stat.S_ISREG(os.lstat(target).st_mode):
+            raise RuntimeError(f"{target} is not a regular file")
+        emit("ready", target)
+        return
+    with urllib.request.urlopen(WORDS_URL, timeout=30) as response:
+        data = response.read(4 * 1024 * 1024)
+    if hashlib.sha256(data).hexdigest() != WORDS_SHA256:
+        raise RuntimeError("downloaded word list failed its checksum")
+    fd, tmp = tempfile.mkstemp(prefix=".words-", dir=os.path.dirname(target))
+    with os.fdopen(fd, "wb") as f:
+        f.write(data)
+    os.rename(tmp, target)
+    emit("ready", target)
+
+
 def main():
+    if len(sys.argv) == 3 and sys.argv[1] == "--words":
+        try:
+            words(sys.argv[2])
+        except Exception as error:
+            emit("error", f"word list: {error}".replace("\n", " "))
+            sys.exit(1)
+        return
     try:
         keyboard = Keyboard()
         keyboard.run()

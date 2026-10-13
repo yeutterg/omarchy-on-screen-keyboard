@@ -3,6 +3,7 @@ import Quickshell
 import qs.Commons
 import qs.Commons as Commons
 import "Layouts.js" as Layouts
+import "Swipe.js" as Swipe
 
 // The keys. Sends everything through `service` (Service.qml), which owns the
 // helper process and the keyboard's visibility.
@@ -29,7 +30,67 @@ Item {
     for (var i = 0; i < rows.length; i++) widest = Math.max(widest, rowUnits(rows[i]))
     return (width - gap * 2 - gap * (widest - 1)) / widest
   }
-  readonly property real rowHeight: (height - gap * (rows.length + 1)) / rows.length
+  readonly property real rowHeight: (height - stripHeight - gap * (rows.length + 1)) / rows.length
+
+  // ---- swipe typing --------------------------------------------------------
+  // Slide one finger from letter to letter; on lift the path is matched
+  // against the word list (Swipe.js) and the best word is typed, with a space
+  // before it unless one was just typed. The strip above the keys offers the
+  // next best words; tapping one replaces the word.
+  readonly property bool swipeOn: service.swipeReady && view === "letters"
+  readonly property real stripHeight: service.swipeReady ? Math.round(Math.max(24, height * 0.11)) : 0
+  property var suggestions: []
+  property string swipedWord: ""      // the last swiped word, as typed
+  property bool afterSpace: true      // last thing typed ends a word
+  property var trail: []
+
+  function isLetterKey(item) { return !!item && item.key.t === "char" && /^[a-z]$/i.test(item.key.l) }
+
+  function letterCenters() {
+    var centers = {}
+    for (var r = 0; r < keys.children.length; r++) {
+      var row = keys.children[r]
+      for (var k = 0; k < row.children.length; k++) {
+        var item = row.children[k]
+        if (item.isKey && isLetterKey(item)) {
+          var c = item.mapToItem(root, item.width / 2, item.height / 2)
+          centers[item.key.l.toLowerCase()] = { x: c.x, y: c.y }
+        }
+      }
+    }
+    return centers
+  }
+
+  function cased(word) {
+    if (capsLock) return word.toUpperCase()
+    if (shift) return word[0].toUpperCase() + word.slice(1)
+    return word
+  }
+
+  function finishSwipe(path) {
+    trail = []
+    var words = Swipe.decode(path, letterCenters(), unit + gap, rowHeight + gap, 3)
+    if (!words.length) return
+    words = words.map(cased)
+    var text = (afterSpace ? "" : " ") + words[0]
+    service.sendText(text)
+    swipedWord = words[0]
+    suggestions = words
+    afterSpace = false
+    if (shift && !capsLock) shift = false
+  }
+
+  function replaceSwiped(word) {
+    if (!swipedWord || word === swipedWord) return
+    for (var i = 0; i < swipedWord.length; i++) service.sendKey("BackSpace", [])
+    service.sendText(word)
+    swipedWord = word
+  }
+
+  Connections {
+    target: root.service
+    function onImActiveChanged() { root.afterSpace = true; root.suggestions = []; root.swipedWord = "" }
+  }
 
   readonly property color surface: Commons.Color.popups.background
   readonly property color text: Commons.Color.popups.text
@@ -59,6 +120,11 @@ Item {
 
   function activate(key) {
     var latched = modList()
+    if (["char", "space", "key"].indexOf(key.t) >= 0) {
+      afterSpace = key.t === "space" || key.v === "Return" || key.v === "Tab"
+      suggestions = []
+      swipedWord = ""
+    }
     switch (key.t) {
     case "char":
       var ch = key.v || key.l
@@ -109,10 +175,55 @@ Item {
     color: root.surface
   }
 
+  // Suggestions after a swipe: the typed word in the middle, alternatives on
+  // either side. Taps are handled by the touch controller below.
+  Row {
+    id: strip
+    visible: root.stripHeight > 0
+    anchors { left: parent.left; right: parent.right; top: parent.top; margins: root.gap; bottomMargin: 0 }
+    height: root.stripHeight - root.gap
+
+    Repeater {
+      model: 3
+      Item {
+        required property int index
+        // Show order: alternative, chosen word, alternative.
+        readonly property string word: {
+          var s = root.suggestions
+          var order = [1, 0, 2]
+          return s.length > order[index] ? s[order[index]] : ""
+        }
+        readonly property bool isStripCell: true
+        width: strip.width / 3
+        height: strip.height
+
+        Text {
+          anchors.centerIn: parent
+          width: parent.width - 8
+          horizontalAlignment: Text.AlignHCenter
+          elide: Text.ElideRight
+          text: parent.word
+          textFormat: Text.PlainText
+          color: parent.word === root.swipedWord ? root.accent : root.text
+          font.family: Style.font.family
+          font.pixelSize: Math.round(strip.height * 0.5)
+        }
+        Rectangle {
+          visible: index < 2
+          anchors { right: parent.right; verticalCenter: parent.verticalCenter }
+          width: 1
+          height: parent.height * 0.5
+          color: root.keyBorder
+        }
+      }
+    }
+  }
+
   Column {
     id: keys
     anchors.fill: parent
     anchors.margins: root.gap
+    anchors.topMargin: root.gap + root.stripHeight
     spacing: root.gap
 
     Repeater {
@@ -193,6 +304,33 @@ Item {
     return key && key.isKey && !key.isGap && key.visible ? key : null
   }
 
+  Canvas {
+    id: trailCanvas
+    anchors.fill: parent
+    property var points: root.trail
+    onPointsChanged: requestPaint()
+    onPaint: {
+      var ctx = getContext("2d")
+      ctx.reset()
+      if (points.length < 2) return
+      ctx.strokeStyle = Qt.alpha(root.accent, 0.55)
+      ctx.lineWidth = Math.max(4, root.unit * 0.12)
+      ctx.lineCap = "round"
+      ctx.lineJoin = "round"
+      ctx.beginPath()
+      ctx.moveTo(points[0].x, points[0].y)
+      for (var i = 1; i < points.length; i++) ctx.lineTo(points[i].x, points[i].y)
+      ctx.stroke()
+    }
+  }
+
+  function stripWordAt(x, y) {
+    if (!strip.visible) return ""
+    var p = root.mapToItem(strip, x, y)
+    var cell = strip.childAt(p.x, p.y)
+    return cell && cell.isStripCell ? cell.word : ""
+  }
+
   MultiPointTouchArea {
     id: touch
     anchors.fill: parent
@@ -224,9 +362,11 @@ Item {
     onPressed: function(touchPoints) {
       for (var i = 0; i < touchPoints.length; i++) {
         var tp = touchPoints[i]
-        var state = { x: tp.x, y: tp.y, key: null }
+        var state = { x: tp.x, y: tp.y, key: null, startX: tp.x, startY: tp.y,
+                      path: [{ x: tp.x, y: tp.y }], swiping: false, startKey: null }
         points[tp.pointId] = state
         setKey(state, root.keyAt(tp.x, tp.y))
+        state.startKey = state.key
       }
       if (ids().length === 1) {
         consumed = false
@@ -247,6 +387,20 @@ Item {
         if (!state) continue
         state.x = tp.x
         state.y = tp.y
+        // One finger sliding from a letter onto another letter is a swipe.
+        if (!pinching && !consumed && ids().length === 1 && root.swipeOn && root.isLetterKey(state.startKey)) {
+          state.path.push({ x: tp.x, y: tp.y })
+          if (!state.swiping) {
+            var over = root.keyAt(tp.x, tp.y)
+            var moved = Math.hypot(tp.x - state.startX, tp.y - state.startY)
+            if (root.isLetterKey(over) && over !== state.startKey && moved > root.unit * 0.5) {
+              state.swiping = true
+              stopTimers()
+              setKey(state, null)
+            }
+          }
+          if (state.swiping) { root.trail = state.path.slice(); continue }
+        }
         // Sliding onto another key types that one instead, as on a phone.
         if (!pinching && !consumed) setKey(state, root.keyAt(tp.x, tp.y))
       }
@@ -269,6 +423,12 @@ Item {
         var key = state.key
         setKey(state, null)
         delete points[tp.pointId]
+        if (state.swiping) { if (!pinching) root.finishSwipe(state.path); continue }
+        if (!key && !pinching && !consumed) {
+          var word = root.stripWordAt(tp.x, tp.y)
+          if (word) root.replaceSwiped(word)
+          continue
+        }
         if (key && !pinching && !consumed) root.activate(key.key)
       }
       if (ids().length === 0) {
@@ -284,6 +444,7 @@ Item {
       for (var i = 0; i < list.length; i++) setKey(points[list[i]], null)
       points = ({})
       pinching = false
+      root.trail = []
       stopTimers()
     }
 

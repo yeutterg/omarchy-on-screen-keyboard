@@ -10,6 +10,9 @@ to just a floating dictation button.
 
 ![On-screen keyboard docked](preview.png)
 
+- **Swipe typing.** Slide a finger across the letters and lift; the word is
+  typed (with a space before it when needed). The strip above the keys shows
+  the next best guesses; tap one to swap it in. Tapping keys works as always.
 - **Pops up on text fields** while in tablet mode, and hides again when the
   field loses focus or the keyboard is reattached.
 - **Four layouts.** Full width, narrow (docked, centred), floating, and a
@@ -84,7 +87,8 @@ as the file is saved. Every key can be left out.
   "narrowWidth": 0.6,
   "extraRow": true,
   "detachableDevice": "Detachable Touchpad",
-  "lockBarInTabletMode": true
+  "lockBarInTabletMode": true,
+  "swipe": true
 }
 ```
 
@@ -100,10 +104,26 @@ as the file is saved. Every key can be left out.
   `/proc/bus/input/devices`. When set, attached/detached follows that device,
   which also gets it right at login. Without it, only the tablet-mode switch
   is used.
+- `swipe`: swipe typing, on by default. It needs an English word list ranked by
+  frequency, which isn't bundled: on first use the helper downloads
+  [FrequencyWords](https://github.com/hermitdave/FrequencyWords)' 50,000-word
+  English list (from OpenSubtitles 2018, CC BY-SA 4.0; about 600 KB) from a
+  pinned commit, checks its SHA-256, and keeps it in
+  `~/.local/share/omarchy-onscreen-keyboard/`. Setting `"swipe": false` deletes
+  it again.
 - `lockBarInTabletMode`: while detached, turn off dragging the bar to another
   edge (Omarchy starts one when the middle of the bar is held and dragged,
   easy to do by accident with a finger). On by default; needs the bar button
   on the bar, since that's what reaches the bar.
+
+## How swipe typing works
+
+`Swipe.js` turns the finger's path into words. Candidates start near where the
+finger went down and end near where it lifted. Each one's ideal path runs
+through the centres of its letters; both paths are resampled to 24 points and
+compared point by point, in key-sized units, and the word's frequency breaks
+close calls. Everything runs locally; nothing about what you type leaves the
+machine.
 
 ## Remove
 
@@ -111,8 +131,9 @@ as the file is saved. Every key can be left out.
 omarchy plugin remove io.github.yeutterg.onscreen-keyboard
 ```
 
-It leaves nothing behind except its remembered position in
-`~/.local/state/omarchy-onscreen-keyboard/`. If you masked fcitx5, unmask it
+It leaves behind its remembered position in
+`~/.local/state/omarchy-onscreen-keyboard/` and, if swipe was on, the word
+list in `~/.local/share/omarchy-onscreen-keyboard/`. If you masked fcitx5, unmask it
 as shown above.
 
 ## How it works

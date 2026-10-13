@@ -5,6 +5,7 @@ import Quickshell.Wayland
 import Quickshell.Hyprland
 import qs.Commons
 import qs.Commons as Commons
+import "Swipe.js" as Swipe
 
 // On-screen keyboard service: runs the Wayland helper, decides when the
 // keyboard shows, and draws it docked along the bottom (full width or narrow)
@@ -15,7 +16,8 @@ import qs.Commons as Commons
 //     "autoShow": "tablet" | "always" | "never",
 //     "narrowWidth": 0.6, "extraRow": true,
 //     "detachableDevice": "detachable touchpad",
-//     "lockBarInTabletMode": true }
+//     "lockBarInTabletMode": true,
+//     "swipe": true }
 //
 // IPC (omarchy-shell onscreen-keyboard <method>):
 //   show | hide | toggle | float | dock | status
@@ -95,6 +97,47 @@ Item {
   readonly property real narrowFraction: typeof options.narrowWidth === "number" ? Math.max(0.3, Math.min(options.narrowWidth, 0.95)) : 0.6
   readonly property bool extraRow: options.extraRow !== false
 
+  // ---- swipe typing ----------------------------------------------------------
+  // On by default. The word list is a download (see helper/osk-helper.py
+  // --words), fetched when swipe is on and deleted when it's turned off.
+  readonly property bool swipeEnabled: options.swipe !== false
+  property bool swipeReady: false
+  property bool optionsLoaded: false
+
+  onSwipeEnabledChanged: if (optionsLoaded) syncWords()
+  onOptionsLoadedChanged: if (optionsLoaded) syncWords()
+
+  function syncWords() {
+    swipeReady = false
+    Swipe.unload()
+    wordsProc.command = ["python3", root.pluginDir + "/helper/osk-helper.py", "--words", swipeEnabled ? "fetch" : "remove"]
+    wordsProc.running = true
+  }
+
+  Process {
+    id: wordsProc
+    stdout: SplitParser {
+      onRead: function(line) {
+        if (line.indexOf("ready ") === 0) {
+          var path = line.slice(6)
+          // Same file as before (turned off and on again): reload it.
+          if (wordsView.path === path) wordsView.reload()
+          else wordsView.path = path
+        }
+        else if (line.indexOf("error ") === 0) console.warn("onscreen-keyboard:", line)
+      }
+    }
+  }
+
+  FileView {
+    id: wordsView
+    printErrors: false
+    onLoaded: {
+      Swipe.load(text())
+      root.swipeReady = root.swipeEnabled && Swipe.loaded
+    }
+  }
+
   FileView {
     id: configView
     path: root.configFile
@@ -104,8 +147,9 @@ Item {
     onLoaded: {
       try { root.options = JSON.parse(text()) || ({}) }
       catch (e) { root.options = ({}); console.warn("onscreen-keyboard: bad JSON in", root.configFile) }
+      root.optionsLoaded = true
     }
-    onLoadFailed: root.options = ({})
+    onLoadFailed: { root.options = ({}); root.optionsLoaded = true }
   }
 
   onImActiveChanged: {
@@ -317,7 +361,7 @@ Item {
     function status(): string {
       return JSON.stringify({ shown: root.shown, layout: root.layoutMode, tabletMode: root.tabletMode,
                               textField: root.imActive, purpose: root.purpose, helper: root.helperReady,
-                              switches: root.tabletSwitches, barLock: root.barLockReady, problem: root.problem })
+                              switches: root.tabletSwitches, barLock: root.barLockReady, swipe: root.swipeReady, problem: root.problem })
     }
   }
 
