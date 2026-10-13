@@ -13,7 +13,8 @@ import qs.Commons as Commons
 // Options live in ~/.config/omarchy/onscreen-keyboard.json (read live):
 //   { "dictationCommand": "voxtype record toggle",
 //     "autoShow": "tablet" | "always" | "never",
-//     "narrowWidth": 0.6, "extraRow": true }
+//     "narrowWidth": 0.6, "extraRow": true,
+//     "detachableDevice": "detachable touchpad" }
 //
 // IPC (omarchy-shell onscreen-keyboard <method>):
 //   show | hide | toggle | float | dock | status
@@ -169,12 +170,22 @@ Item {
 
   Component.onDestruction: if (helper.running) helper.write("quit\n")
 
-  // ---- tablet-mode switch --------------------------------------------------
-  // Any input device whose switch bitmap has SW_TABLET_MODE (bit 1). Binds are
-  // added at runtime with hyprctl eval, so no Hyprland config is edited; they
-  // are added again whenever Hyprland reloads its config.
+  // ---- tablet mode -----------------------------------------------------------
+  // Two sources, checked every few seconds from /proc/bus/input/devices:
+  //  * Tablet-mode switches: any input device whose switch bitmap has
+  //    SW_TABLET_MODE (bit 1). Their on/off events arrive through Hyprland
+  //    binds added at runtime with hyprctl eval (no Hyprland config is
+  //    edited), added again whenever Hyprland reloads its config. Some drivers
+  //    (intel-hid) only create the switch device on its first change, so the
+  //    list is rescanned and a switch that turns up later counts as that first
+  //    change: detached.
+  //  * Options "detachableDevice": a piece of the name of an input device that
+  //    only exists while the keyboard is attached (its touchpad, say). When
+  //    set, attached/detached follows that device and also works at login.
 
   property var tabletSwitches: []
+  property bool scannedOnce: false
+  readonly property string detachableDevice: typeof options.detachableDevice === "string" ? options.detachableDevice.toLowerCase() : ""
 
   Process {
     id: findSwitches
@@ -182,11 +193,11 @@ Item {
     running: true
     stdout: StdioCollector {
       onStreamFinished: {
-        var names = [], name = ""
+        var names = [], name = "", deviceNames = []
         var lines = text.split("\n")
         for (var i = 0; i < lines.length; i++) {
           var n = lines[i].match(/^N: Name="(.*)"$/)
-          if (n) name = n[1]
+          if (n) { name = n[1]; deviceNames.push(name.toLowerCase()) }
           var sw = lines[i].match(/^B: SW=(.*)$/)
           if (sw) {
             var words = sw[1].trim().split(/\s+/)
@@ -194,10 +205,26 @@ Item {
             if (Math.floor(low / 2) % 2 === 1) names.push(name)
           }
         }
-        root.tabletSwitches = names
-        root.registerBinds()
+        if (root.detachableDevice !== "") {
+          var attached = deviceNames.some(function(d) { return d.indexOf(root.detachableDevice) >= 0 })
+          if (root.tabletMode === attached) root.tabletMode = !attached
+        }
+        if (names.join("\n") !== root.tabletSwitches.join("\n")) {
+          var appeared = root.scannedOnce && names.length > root.tabletSwitches.length
+          root.tabletSwitches = names
+          root.registerBinds()
+          if (appeared && root.detachableDevice === "") root.tabletMode = true
+        }
+        root.scannedOnce = true
       }
     }
+  }
+
+  Timer {
+    interval: 3000
+    repeat: true
+    running: true
+    onTriggered: if (!findSwitches.running) findSwitches.running = true
   }
 
   function luaString(s) { return "'" + String(s).replace(/\\/g, "\\\\").replace(/'/g, "\\'") + "'" }

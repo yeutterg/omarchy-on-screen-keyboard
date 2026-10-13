@@ -81,7 +81,8 @@ as the file is saved. Every key can be left out.
   "dictationCommand": "voxtype record toggle",
   "autoShow": "tablet",
   "narrowWidth": 0.6,
-  "extraRow": true
+  "extraRow": true,
+  "detachableDevice": "Detachable Touchpad"
 }
 ```
 
@@ -92,6 +93,11 @@ as the file is saved. Every key can be left out.
 - `narrowWidth`: width of the narrow docked keyboard, as a fraction of the
   screen (0.3 to 0.95).
 - `extraRow`: the esc/tab/ctrl/alt/arrows row on docked layouts.
+- `detachableDevice`: part of the name of an input device that only exists
+  while the keyboard is attached (its touchpad, say), from
+  `/proc/bus/input/devices`. When set, attached/detached follows that device,
+  which also gets it right at login. Without it, only the tablet-mode switch
+  is used.
 
 ## Remove
 
@@ -128,8 +134,10 @@ as shown above.
   button.
 - The switch's current position can't be read without access to
   `/dev/input` (the `input` group), so the plugin assumes the keyboard is
-  attached until the switch first changes. After logging in detached, attach
-  and detach once, or run `omarchy-shell onscreen-keyboard setTabletMode true`.
+  attached until the switch first changes, unless `detachableDevice` is set
+  (see Options). Some drivers (intel-hid) only create the switch device on its
+  first change; the plugin rescans the device list every few seconds and
+  treats a switch that appears later as a detach.
 - Layout and floating positions are saved to
   `~/.local/state/omarchy-onscreen-keyboard/state.json`.
 
