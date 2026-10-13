@@ -27,6 +27,7 @@ to just a floating dictation button.
 - **Esc, Tab, Ctrl, Alt and arrows** on an extra row for terminals.
 - **Bar button** to show or hide the keyboard. It appears only while the
   keyboard is detached (or the on-screen keyboard is open).
+- **The bar stays put** while detached: dragging it to another edge is off.
 - Follows theme and font changes live.
 
 ## Install
@@ -82,7 +83,8 @@ as the file is saved. Every key can be left out.
   "autoShow": "tablet",
   "narrowWidth": 0.6,
   "extraRow": true,
-  "detachableDevice": "Detachable Touchpad"
+  "detachableDevice": "Detachable Touchpad",
+  "lockBarInTabletMode": true
 }
 ```
 
@@ -98,6 +100,10 @@ as the file is saved. Every key can be left out.
   `/proc/bus/input/devices`. When set, attached/detached follows that device,
   which also gets it right at login. Without it, only the tablet-mode switch
   is used.
+- `lockBarInTabletMode`: while detached, turn off dragging the bar to another
+  edge (Omarchy starts one when the middle of the bar is held and dragged,
+  easy to do by accident with a finger). On by default; needs the bar button
+  on the bar, since that's what reaches the bar.
 
 ## Remove
 

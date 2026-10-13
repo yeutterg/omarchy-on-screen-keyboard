@@ -14,7 +14,8 @@ import qs.Commons as Commons
 //   { "dictationCommand": "voxtype record toggle",
 //     "autoShow": "tablet" | "always" | "never",
 //     "narrowWidth": 0.6, "extraRow": true,
-//     "detachableDevice": "detachable touchpad" }
+//     "detachableDevice": "detachable touchpad",
+//     "lockBarInTabletMode": true }
 //
 // IPC (omarchy-shell onscreen-keyboard <method>):
 //   show | hide | toggle | float | dock | status
@@ -53,6 +54,8 @@ Item {
   property bool voxtypeInstalled: false
   readonly property bool dictationAvailable: customDictation || voxtypeInstalled
   property bool dictating: false
+  // Set by the bar widget once it has found the bar to lock in tablet mode.
+  property bool barLockReady: false
 
   readonly property var screen: {
     var name = Hyprland.focusedMonitor ? Hyprland.focusedMonitor.name : ""
@@ -314,7 +317,7 @@ Item {
     function status(): string {
       return JSON.stringify({ shown: root.shown, layout: root.layoutMode, tabletMode: root.tabletMode,
                               textField: root.imActive, purpose: root.purpose, helper: root.helperReady,
-                              switches: root.tabletSwitches, problem: root.problem })
+                              switches: root.tabletSwitches, barLock: root.barLockReady, problem: root.problem })
     }
   }
 
