@@ -28,8 +28,8 @@ to just a floating dictation button.
   is set (see Options).
 - **A digit pad** for PIN, phone and number fields.
 - **Esc, Tab, Ctrl, Alt and arrows** on an extra row for terminals.
-- **Bar button** to show or hide the keyboard. It appears only while the
-  keyboard is detached (or the on-screen keyboard is open).
+- **A button to show or hide it:** on the bar while the keyboard is detached,
+  in the system tray while it's attached (both configurable).
 - **The bar stays put** while detached: dragging it to another edge is off.
 - Follows theme and font changes live.
 
@@ -88,7 +88,8 @@ as the file is saved. Every key can be left out.
   "extraRow": true,
   "detachableDevice": "Detachable Touchpad",
   "lockBarInTabletMode": true,
-  "swipe": true
+  "swipe": true,
+  "barButton": { "attached": "tray", "detached": "bar" }
 }
 ```
 
@@ -111,6 +112,13 @@ as the file is saved. Every key can be left out.
   pinned commit, checks its SHA-256, and keeps it in
   `~/.local/share/omarchy-onscreen-keyboard/`. Setting `"swipe": false` deletes
   it again.
+- `barButton`: where the show/hide button goes, separately for `attached` and
+  `detached`: `"bar"` (an icon on the bar), `"tray"` (an icon in the system
+  tray, in its drawer unless you pin it) or `"none"`. Default: tray when
+  attached, bar when detached. While the keyboard is open, the button stays on
+  the bar so you can always close it. The tray icon is a small
+  StatusNotifierItem (`helper/tray-icon.py`, using the system PyGObject); a
+  click toggles the keyboard, a middle click cycles its layout.
 - `lockBarInTabletMode`: while detached, turn off dragging the bar to another
   edge (Omarchy starts one when the middle of the bar is held and dragged,
   easy to do by accident with a finger). On by default; needs the bar button

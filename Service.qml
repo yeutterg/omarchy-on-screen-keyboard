@@ -17,7 +17,8 @@ import "Swipe.js" as Swipe
 //     "narrowWidth": 0.6, "extraRow": true,
 //     "detachableDevice": "detachable touchpad",
 //     "lockBarInTabletMode": true,
-//     "swipe": true }
+//     "swipe": true,
+//     "barButton": { "attached": "tray", "detached": "bar" } }
 //
 // IPC (omarchy-shell onscreen-keyboard <method>):
 //   show | hide | toggle | float | dock | status
@@ -96,6 +97,26 @@ Item {
   readonly property string autoShow: ["tablet", "always", "never"].indexOf(options.autoShow) >= 0 ? options.autoShow : "tablet"
   readonly property real narrowFraction: typeof options.narrowWidth === "number" ? Math.max(0.3, Math.min(options.narrowWidth, 0.95)) : 0.6
   readonly property bool extraRow: options.extraRow !== false
+
+  // ---- where the show/hide button goes ---------------------------------------
+  // "bar": an icon on the bar; "tray": an icon in the system tray (its drawer
+  // unless pinned); "none": no button. Separate for attached and detached.
+  // While the keyboard is open the button stays reachable, on the bar at least.
+  function placementOption(which, fallback) {
+    var b = options.barButton
+    var v = b && typeof b === "object" ? b[which] : undefined
+    return ["bar", "tray", "none"].indexOf(v) >= 0 ? v : fallback
+  }
+  readonly property string buttonPlacement: {
+    var p = tabletMode ? placementOption("detached", "bar") : placementOption("attached", "tray")
+    return p === "none" && shown ? "bar" : p
+  }
+
+  Process {
+    id: trayIcon
+    command: ["python3", root.pluginDir + "/helper/tray-icon.py"]
+    running: root.buttonPlacement === "tray"
+  }
 
   // ---- swipe typing ----------------------------------------------------------
   // On by default. The word list is a download (see helper/osk-helper.py

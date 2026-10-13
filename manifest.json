@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "io.github.yeutterg.onscreen-keyboard",
   "name": "On-Screen Keyboard",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "author": "yeutterg",
   "license": "MIT",
   "description": "A touch keyboard in Omarchy's style: swipe typing, pops up on text fields in tablet mode; pinch from full width to narrow, floating, or just a dictation button for voxtype.",
